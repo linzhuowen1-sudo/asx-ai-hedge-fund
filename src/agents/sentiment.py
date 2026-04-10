@@ -1,6 +1,6 @@
 """Sentiment analyst agent — multi-source Australian news with time-decay weighting.
 
-All data comes from web scraping — NO API keys needed.
+Data fetched via opencli (https://github.com/jackwener/opencli) — NO API keys needed.
 News is filtered to the last 30 days and weighted by recency:
   - 0~3 days old  → weight × 1.0  (full weight)
   - 4~7 days old  → weight × 0.8
@@ -9,36 +9,34 @@ News is filtered to the last 30 days and weighted by recency:
   - 22~30 days old → weight × 0.15
 
 Source credibility weights:
-  AFR              → 1.0  (institutional financial journalism)
+  Bloomberg        → 1.0  (global institutional financial news)
+  AFR              → 1.0  (Australian institutional financial journalism)
   The Australian   → 0.9  (mainstream financial news)
-  ABC News         → 0.85 (public broadcaster, free, reliable)
-  MarketIndex      → 0.8  (ASX-specific, focused)
   Google News AU   → 0.7  (aggregated, mixed quality)
-  yfinance         → 0.6  (global news, less AU context)
+  Twitter/X        → 0.4  (real-time but noisy social sentiment)
   Reddit           → 0.3  (retail noise, useful as contrarian)
 """
 
 import json
-import math
 
 from langchain_core.messages import HumanMessage
 
 from src.data.models import AnalystSignal, Signal
 from src.graph.state import AgentState
 from src.llm.models import get_llm
-from src.tools.asx_data import get_company_info, get_news as get_yfinance_news
+from src.tools.asx_data import get_company_info
 from src.tools.au_news import fetch_all_au_news
 
 
 # ──────────────────── Weighting ────────────────────
 
 SOURCE_CREDIBILITY = {
+    "Bloomberg": 1.0,
     "AFR": 1.0,
     "The Australian": 0.9,
-    "ABC News": 0.85,
-    "MarketIndex": 0.8,
     "Google News AU": 0.7,
-    "yfinance": 0.6,
+    "Google News": 0.7,
+    "Twitter/X": 0.4,
     "Reddit r/ASX_Bets": 0.3,
     "Reddit r/AusFinance": 0.35,
     "Reddit r/AusStocks": 0.3,
@@ -100,10 +98,10 @@ Each article has:
 Give proportionally MORE attention to articles with higher weight.
 
 ## Source Credibility Tiers
-- **Tier 1 (High trust):** AFR, The Australian, ABC News — institutional journalism
-- **Tier 2 (Medium trust):** MarketIndex, Google News AU — aggregated/specialised
-- **Tier 3 (Low trust / contrarian):** Reddit — retail sentiment. Extreme one-sided
-  sentiment on r/ASX_Bets is often a CONTRARIAN indicator.
+- **Tier 1 (High trust):** Bloomberg, AFR, The Australian — institutional financial journalism
+- **Tier 2 (Medium trust):** Google News AU — aggregated, mixed quality
+- **Tier 3 (Low trust / contrarian):** Twitter/X, Reddit — social/retail sentiment.
+  Extreme one-sided sentiment on r/ASX_Bets or Twitter is often a CONTRARIAN indicator.
 
 ## Articles (sorted by weight, highest first):
 
@@ -151,7 +149,7 @@ def _format_article(article: dict) -> str:
     return line
 
 
-def _format_all_articles(all_news: dict[str, list[dict]], yf_news: list[dict]) -> str:
+def _format_all_articles(all_news: dict[str, list[dict]]) -> str:
     """Merge all sources, compute weights, sort by weight descending."""
     articles = []
 
@@ -159,13 +157,6 @@ def _format_all_articles(all_news: dict[str, list[dict]], yf_news: list[dict]) -
         for item in items:
             item["_weight"] = _combined_weight(item.get("source", ""), item.get("days_ago"))
             articles.append(item)
-
-    # Add yfinance news
-    for item in yf_news:
-        item["source"] = item.get("source", "yfinance")
-        item["days_ago"] = item.get("days_ago")  # May be None
-        item["_weight"] = _combined_weight("yfinance", item.get("days_ago"))
-        articles.append(item)
 
     # Sort by weight descending
     articles.sort(key=lambda x: x.get("_weight", 0), reverse=True)
@@ -187,7 +178,7 @@ def _format_all_articles(all_news: dict[str, list[dict]], yf_news: list[dict]) -
 def sentiment_agent(state: AgentState) -> dict:
     """Multi-source, time-weighted sentiment analysis for ASX stocks.
 
-    No API keys needed — all data via web scraping.
+    No API keys needed — all data fetched via opencli.
     """
     tickers = state["metadata"]["tickers"]
     signals = {}
@@ -198,23 +189,21 @@ def sentiment_agent(state: AgentState) -> dict:
         company_info = get_company_info(ticker)
         company_name = company_info.name if company_info else ticker.replace(".AX", "")
 
-        # ── Fetch from all sources (web scraping only) ──
+        # ── Fetch from all sources via opencli ──
         au_news = fetch_all_au_news(
             ticker=ticker,
             company_name=company_name,
             max_per_source=10,
         )
-        yf_news = get_yfinance_news(ticker)
 
         # ── Coverage stats ──
         coverage = {
+            "Bloomberg": len(au_news.get("bloomberg", [])),
             "AFR": len(au_news.get("afr", [])),
             "The Australian": len(au_news.get("the_australian", [])),
             "Google News AU": len(au_news.get("google_news_au", [])),
-            "ABC News": len(au_news.get("abc_news", [])),
-            "MarketIndex": len(au_news.get("marketindex", [])),
+            "Twitter/X": len(au_news.get("twitter", [])),
             "Reddit": len(au_news.get("reddit", [])),
-            "yfinance": len(yf_news),
         }
         total = sum(coverage.values())
         coverage_str = ", ".join(f"{k}:{v}" for k, v in coverage.items() if v > 0)
@@ -225,12 +214,12 @@ def sentiment_agent(state: AgentState) -> dict:
                 ticker=ticker,
                 signal=Signal.NEUTRAL,
                 confidence=10,
-                reasoning=f"No news found in the last 30 days from any source.",
+                reasoning="No news found in the last 30 days from any source.",
             )
             continue
 
         # ── Build weighted article list ──
-        articles_text = _format_all_articles(au_news, yf_news)
+        articles_text = _format_all_articles(au_news)
 
         prompt = SENTIMENT_PROMPT.format(
             ticker=ticker,
