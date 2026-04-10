@@ -1,5 +1,8 @@
 """LangGraph state definition for the hedge fund agent system."""
 
+from __future__ import annotations
+
+
 import operator
 from typing import Annotated, Any, Sequence
 

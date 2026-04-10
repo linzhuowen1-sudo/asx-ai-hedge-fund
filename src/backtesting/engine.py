@@ -1,5 +1,8 @@
 """Backtesting engine for ASX AI Hedge Fund."""
 
+from __future__ import annotations
+
+
 from datetime import datetime, timedelta
 
 import yfinance as yf

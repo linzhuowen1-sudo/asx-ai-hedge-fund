@@ -17,6 +17,9 @@ Source credibility weights:
   Reddit           → 0.3  (retail noise, useful as contrarian)
 """
 
+from __future__ import annotations
+
+
 import json
 
 from langchain_core.messages import HumanMessage

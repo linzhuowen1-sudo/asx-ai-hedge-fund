@@ -1,5 +1,8 @@
 """LangGraph orchestration — defines the agent execution graph."""
 
+from __future__ import annotations
+
+
 from langgraph.graph import END, StateGraph
 
 from src.agents.fundamentals import fundamentals_agent
