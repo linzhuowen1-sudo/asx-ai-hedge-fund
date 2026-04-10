@@ -47,6 +47,9 @@ def _parse_date(date_str: str) -> Optional[datetime]:
         return None
     date_str = date_str.strip()
 
+    # Strip common prefixes
+    date_str = re.sub(r"^(Updated |Published )", "", date_str).strip()
+
     formats = [
         "%Y-%m-%dT%H:%M:%S%z",
         "%Y-%m-%dT%H:%M:%SZ",
@@ -58,9 +61,9 @@ def _parse_date(date_str: str) -> Optional[datetime]:
         "%d %B %Y",
         "%B %d, %Y",
         "%b %d, %Y",
-        "%b %d, %Y",
         "%a, %d %b %Y %H:%M:%S %z",
         "%a, %d %b %Y %H:%M:%S %Z",
+        "%a %b %d %H:%M:%S %z %Y",     # Twitter: "Tue Apr 07 09:48:24 +0000 2026"
     ]
     for fmt in formats:
         try:
@@ -316,17 +319,20 @@ def _parse_afr_markdown(md: str, max_results: int) -> list[dict]:
             if not link.startswith("http"):
                 link = f"https://www.afr.com{link}"
 
-            # Look ahead for summary and date
+            # Look ahead for summary and date (skip empty lines)
             summary = ""
             published = ""
-            for j in range(i + 1, min(i + 8, len(lines))):
+            for j in range(i + 1, min(i + 12, len(lines))):
                 next_line = lines[j].strip()
-                if not next_line or next_line.startswith("#"):
+                if next_line.startswith("#"):
                     break
-                # Date patterns
+                if not next_line:
+                    continue
+                # Date patterns (e.g. "- Apr 8, 2026" or "Apr 8, 2026")
+                clean_line = re.sub(r"^-\s*", "", next_line)
                 date_match = re.search(
                     r"((?:Updated )?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s+\d{4})",
-                    next_line,
+                    clean_line,
                 )
                 if date_match:
                     published = date_match.group(1).replace("Updated ", "")
@@ -388,13 +394,16 @@ def _parse_generic_news_markdown(
 
             summary = ""
             published = ""
-            for j in range(i + 1, min(i + 8, len(lines))):
+            for j in range(i + 1, min(i + 12, len(lines))):
                 next_line = lines[j].strip()
-                if not next_line or next_line.startswith("#"):
+                if next_line.startswith("#"):
                     break
+                if not next_line:
+                    continue
+                clean_line = re.sub(r"^-\s*", "", next_line)
                 date_match = re.search(
                     r"((?:Updated )?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s+\d{4})",
-                    next_line,
+                    clean_line,
                 )
                 if date_match:
                     published = date_match.group(1).replace("Updated ", "")
