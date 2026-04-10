@@ -1,15 +1,25 @@
-"""Sentiment analyst agent — multi-source Australian news sentiment.
+"""Sentiment analyst agent — multi-source Australian news with time-decay weighting.
 
-Data Sources (weighted by credibility):
-  1. AFR (Australian Financial Review) — weight 1.0 (institutional, high quality)
-  2. The Australian                    — weight 0.9 (mainstream financial)
-  3. Google News AU                    — weight 0.7 (aggregated, mixed quality)
-  4. yfinance news                     — weight 0.6 (global, may lack AU context)
-  5. Twitter/X                         — weight 0.4 (noisy but real-time sentiment)
-  6. Reddit (r/ASX_Bets, r/AusFinance) — weight 0.3 (retail sentiment, contrarian indicator)
+All data comes from web scraping — NO API keys needed.
+News is filtered to the last 30 days and weighted by recency:
+  - 0~3 days old  → weight × 1.0  (full weight)
+  - 4~7 days old  → weight × 0.8
+  - 8~14 days old → weight × 0.5
+  - 15~21 days old → weight × 0.3
+  - 22~30 days old → weight × 0.15
+
+Source credibility weights:
+  AFR              → 1.0  (institutional financial journalism)
+  The Australian   → 0.9  (mainstream financial news)
+  ABC News         → 0.85 (public broadcaster, free, reliable)
+  MarketIndex      → 0.8  (ASX-specific, focused)
+  Google News AU   → 0.7  (aggregated, mixed quality)
+  yfinance         → 0.6  (global news, less AU context)
+  Reddit           → 0.3  (retail noise, useful as contrarian)
 """
 
 import json
+import math
 
 from langchain_core.messages import HumanMessage
 
@@ -20,90 +30,165 @@ from src.tools.asx_data import get_company_info, get_news as get_yfinance_news
 from src.tools.au_news import fetch_all_au_news
 
 
-# Source credibility weights — higher = more trusted
-SOURCE_WEIGHTS = {
+# ──────────────────── Weighting ────────────────────
+
+SOURCE_CREDIBILITY = {
     "AFR": 1.0,
     "The Australian": 0.9,
+    "ABC News": 0.85,
+    "MarketIndex": 0.8,
     "Google News AU": 0.7,
     "yfinance": 0.6,
-    "Twitter/X": 0.4,
     "Reddit r/ASX_Bets": 0.3,
     "Reddit r/AusFinance": 0.35,
     "Reddit r/AusStocks": 0.3,
 }
 
-# Get weight for a source, defaulting to 0.5
-def _get_weight(source: str) -> float:
-    for key, weight in SOURCE_WEIGHTS.items():
-        if key.lower() in source.lower():
-            return weight
+
+def _source_weight(source_name: str) -> float:
+    """Look up credibility weight by source name (fuzzy match)."""
+    for key, w in SOURCE_CREDIBILITY.items():
+        if key.lower() in source_name.lower():
+            return w
     return 0.5
 
 
-SENTIMENT_PROMPT = """You are a senior financial sentiment analyst specializing in the Australian Securities Exchange (ASX).
+def _time_decay(days_ago: float | None) -> float:
+    """Return a decay multiplier based on how old the article is.
 
-You must analyze news and social media about {ticker} ({company_name}) from MULTIPLE Australian sources, considering source credibility.
+    Uses a piecewise linear schedule so the LLM prompt can explain it:
+      0~3 days   → 1.0
+      4~7 days   → 0.8
+      8~14 days  → 0.5
+      15~21 days → 0.3
+      22~30 days → 0.15
+      >30 days   → 0.0  (should already be filtered out)
+    """
+    if days_ago is None:
+        return 0.5  # Unknown date → treat as mid-weight
+    if days_ago <= 3:
+        return 1.0
+    if days_ago <= 7:
+        return 0.8
+    if days_ago <= 14:
+        return 0.5
+    if days_ago <= 21:
+        return 0.3
+    if days_ago <= 30:
+        return 0.15
+    return 0.0
+
+
+def _combined_weight(source: str, days_ago: float | None) -> float:
+    """Final weight = source_credibility × time_decay."""
+    return _source_weight(source) * _time_decay(days_ago)
+
+
+# ──────────────────── Prompt ────────────────────
+
+SENTIMENT_PROMPT = """You are a senior financial sentiment analyst specialising in the Australian Securities Exchange (ASX).
+
+Analyse the following news about **{ticker}** ({company_name}) collected from Australian sources over the **last 30 days**.
+
+## How to read the articles
+
+Each article has:
+- **Source** and **credibility tier** (Tier 1 = most trustworthy)
+- **Age** (days ago) — more recent = more relevant
+- **Weight** — pre-computed combined score (source credibility × time decay, 0–1)
+
+Give proportionally MORE attention to articles with higher weight.
 
 ## Source Credibility Tiers
-- **Tier 1 (High trust):** AFR, The Australian — institutional journalism, fact-checked
-- **Tier 2 (Medium trust):** Google News AU, yfinance — aggregated, mixed quality
-- **Tier 3 (Low trust / contrarian):** Twitter/X, Reddit — retail sentiment, noisy but useful for gauging crowd psychology. Extreme bullishness on Reddit r/ASX_Bets can be a contrarian BEARISH indicator.
+- **Tier 1 (High trust):** AFR, The Australian, ABC News — institutional journalism
+- **Tier 2 (Medium trust):** MarketIndex, Google News AU — aggregated/specialised
+- **Tier 3 (Low trust / contrarian):** Reddit — retail sentiment. Extreme one-sided
+  sentiment on r/ASX_Bets is often a CONTRARIAN indicator.
 
-## News from each source:
+## Articles (sorted by weight, highest first):
 
-{sources_text}
+{articles_text}
 
 ## Analysis Requirements
 
-1. **Weigh sources by credibility** — a single AFR article is worth more than 10 Reddit posts
-2. **Look for consensus vs divergence** — if institutions are bearish but retail is bullish, that's a warning
-3. **Identify catalysts** — earnings, regulatory, M&A, commodity prices, RBA decisions
-4. **Consider recency** — more recent news carries more weight
-5. **Detect sentiment extremes** — overwhelming one-sided sentiment often precedes reversals
-6. **Australian context** — RBA rate decisions, AUD movements, China trade relations, commodity cycles
+1. Articles with weight > 0.5 should drive your conclusion.
+2. Articles with weight 0.2–0.5 provide context.
+3. Articles with weight < 0.2 are background noise — only notable if they show extreme unanimity.
+4. Look for **consensus vs divergence** across tiers.
+5. Identify concrete **catalysts** (earnings, RBA, M&A, commodity prices, regulation, China).
+6. Factor in **Australian macro**: AUD/USD, RBA cash rate, iron ore / coal / LNG prices, housing.
+7. If almost all sources agree → higher confidence. If they diverge → lower confidence.
 
-Respond with EXACTLY this JSON format:
+Respond with EXACTLY this JSON (no other text):
 {{
     "signal": "bullish" or "bearish" or "neutral",
     "confidence": <number 10-95>,
-    "reasoning": "<2-3 sentence explanation covering key findings>",
+    "reasoning": "<2-3 sentences covering the key findings and which sources drove the conclusion>",
     "source_breakdown": {{
-        "institutional": "bullish/bearish/neutral",
-        "mainstream": "bullish/bearish/neutral",
-        "social": "bullish/bearish/neutral"
+        "tier1_institutional": "bullish/bearish/neutral",
+        "tier2_aggregated": "bullish/bearish/neutral",
+        "tier3_retail": "bullish/bearish/neutral"
     }},
     "key_catalysts": ["<catalyst 1>", "<catalyst 2>"]
 }}
 """
 
 
-def _format_source_news(source_name: str, articles: list[dict], max_items: int = 8) -> str:
-    """Format news articles from a single source."""
+# ──────────────────── Formatting ────────────────────
+
+def _format_article(article: dict) -> str:
+    """Format a single article with its weight for the LLM."""
+    source = article.get("source", "Unknown")
+    title = article.get("title", "").strip()
+    summary = article.get("summary", "").strip()
+    days = article.get("days_ago")
+    weight = _combined_weight(source, days)
+
+    age_str = f"{days:.0f}d ago" if days is not None else "date unknown"
+    line = f"- **[w={weight:.2f}]** [{source}] ({age_str}) {title}"
+    if summary:
+        line += f"\n  _{summary[:150]}_"
+    return line
+
+
+def _format_all_articles(all_news: dict[str, list[dict]], yf_news: list[dict]) -> str:
+    """Merge all sources, compute weights, sort by weight descending."""
+    articles = []
+
+    for source_key, items in all_news.items():
+        for item in items:
+            item["_weight"] = _combined_weight(item.get("source", ""), item.get("days_ago"))
+            articles.append(item)
+
+    # Add yfinance news
+    for item in yf_news:
+        item["source"] = item.get("source", "yfinance")
+        item["days_ago"] = item.get("days_ago")  # May be None
+        item["_weight"] = _combined_weight("yfinance", item.get("days_ago"))
+        articles.append(item)
+
+    # Sort by weight descending
+    articles.sort(key=lambda x: x.get("_weight", 0), reverse=True)
+
     if not articles:
-        return f"### {source_name}\nNo articles found.\n"
+        return "No articles found from any source.\n"
 
-    lines = [f"### {source_name}"]
-    for item in articles[:max_items]:
-        title = item.get("title", "").strip()
-        if not title:
-            continue
+    lines = []
+    for a in articles:
+        formatted = _format_article(a)
+        if formatted:
+            lines.append(formatted)
 
-        summary = item.get("summary", "").strip()
-        source_tag = item.get("source", source_name)
-        engagement = item.get("engagement")
+    return "\n".join(lines)
 
-        line = f"- [{source_tag}] {title}"
-        if summary:
-            line += f"\n  Summary: {summary[:150]}"
-        if engagement is not None:
-            line += f" (engagement: {engagement})"
-        lines.append(line)
 
-    return "\n".join(lines) + "\n"
-
+# ──────────────────── Agent ────────────────────
 
 def sentiment_agent(state: AgentState) -> dict:
-    """Multi-source sentiment analysis for ASX stocks."""
+    """Multi-source, time-weighted sentiment analysis for ASX stocks.
+
+    No API keys needed — all data via web scraping.
+    """
     tickers = state["metadata"]["tickers"]
     signals = {}
     llm = get_llm()
@@ -113,60 +198,50 @@ def sentiment_agent(state: AgentState) -> dict:
         company_info = get_company_info(ticker)
         company_name = company_info.name if company_info else ticker.replace(".AX", "")
 
-        # ── Fetch from all Australian sources ──
+        # ── Fetch from all sources (web scraping only) ──
         au_news = fetch_all_au_news(
             ticker=ticker,
             company_name=company_name,
-            max_per_source=8,
+            max_per_source=10,
         )
-
-        # Also get yfinance news as fallback
         yf_news = get_yfinance_news(ticker)
 
-        # ── Count total articles ──
-        total_articles = sum(len(v) for v in au_news.values()) + len(yf_news)
+        # ── Coverage stats ──
+        coverage = {
+            "AFR": len(au_news.get("afr", [])),
+            "The Australian": len(au_news.get("the_australian", [])),
+            "Google News AU": len(au_news.get("google_news_au", [])),
+            "ABC News": len(au_news.get("abc_news", [])),
+            "MarketIndex": len(au_news.get("marketindex", [])),
+            "Reddit": len(au_news.get("reddit", [])),
+            "yfinance": len(yf_news),
+        }
+        total = sum(coverage.values())
+        coverage_str = ", ".join(f"{k}:{v}" for k, v in coverage.items() if v > 0)
 
-        if total_articles == 0:
+        if total == 0:
             signals[ticker] = AnalystSignal(
                 agent_name="sentiment_analyst",
                 ticker=ticker,
                 signal=Signal.NEUTRAL,
                 confidence=10,
-                reasoning="No news found from any Australian source.",
+                reasoning=f"No news found in the last 30 days from any source.",
             )
             continue
 
-        # ── Format all sources for LLM ──
-        sources_text = ""
-        sources_text += _format_source_news("AFR (Australian Financial Review)", au_news.get("afr", []))
-        sources_text += _format_source_news("The Australian", au_news.get("the_australian", []))
-        sources_text += _format_source_news("Google News AU", au_news.get("google_news_au", []))
-        sources_text += _format_source_news("yfinance (Global)", yf_news)
-        sources_text += _format_source_news("Twitter/X (Social)", au_news.get("twitter", []))
-        sources_text += _format_source_news("Reddit (Retail Investors)", au_news.get("reddit", []))
-
-        # ── Build source coverage summary ──
-        coverage = {
-            "AFR": len(au_news.get("afr", [])),
-            "The Australian": len(au_news.get("the_australian", [])),
-            "Google News": len(au_news.get("google_news_au", [])),
-            "yfinance": len(yf_news),
-            "Twitter": len(au_news.get("twitter", [])),
-            "Reddit": len(au_news.get("reddit", [])),
-        }
-        coverage_str = ", ".join(f"{k}: {v}" for k, v in coverage.items() if v > 0)
+        # ── Build weighted article list ──
+        articles_text = _format_all_articles(au_news, yf_news)
 
         prompt = SENTIMENT_PROMPT.format(
             ticker=ticker,
             company_name=company_name,
-            sources_text=sources_text,
+            articles_text=articles_text,
         )
 
         try:
             response = llm.invoke(prompt)
             content = response.content.strip()
 
-            # Parse JSON response
             if "```" in content:
                 content = content.split("```")[1]
                 if content.startswith("json"):
@@ -184,33 +259,32 @@ def sentiment_agent(state: AgentState) -> dict:
             raw_signal = signal_map.get(result.get("signal", "neutral"), Signal.NEUTRAL)
             raw_confidence = min(max(float(result.get("confidence", 30)), 10), 95)
 
-            # ── Adjust confidence based on source coverage ──
-            # More sources = higher confidence
+            # ── Confidence adjustment based on coverage breadth ──
             active_sources = sum(1 for v in coverage.values() if v > 0)
-            if active_sources >= 4:
-                confidence_boost = 1.1  # 10% boost for 4+ sources
-            elif active_sources >= 2:
-                confidence_boost = 1.0
-            elif active_sources == 1:
-                confidence_boost = 0.8  # Penalize single-source analysis
+            if active_sources >= 5:
+                conf_multiplier = 1.15
+            elif active_sources >= 3:
+                conf_multiplier = 1.0
+            elif active_sources == 2:
+                conf_multiplier = 0.85
             else:
-                confidence_boost = 0.5
+                conf_multiplier = 0.7
 
-            adjusted_confidence = min(raw_confidence * confidence_boost, 95)
+            adjusted_confidence = min(raw_confidence * conf_multiplier, 95)
 
             # ── Build reasoning ──
-            source_breakdown = result.get("source_breakdown", {})
-            catalysts = result.get("key_catalysts", [])
-
             reasoning = result.get("reasoning", "")
-            reasoning += f" [Sources: {coverage_str}]"
+            reasoning += f" [Sources({active_sources}): {coverage_str}]"
+
+            catalysts = result.get("key_catalysts", [])
             if catalysts:
                 reasoning += f" [Catalysts: {', '.join(catalysts[:3])}]"
-            if source_breakdown:
-                inst = source_breakdown.get("institutional", "n/a")
-                social = source_breakdown.get("social", "n/a")
-                if inst != social:
-                    reasoning += f" [Divergence: institutional={inst}, social={social}]"
+
+            breakdown = result.get("source_breakdown", {})
+            t1 = breakdown.get("tier1_institutional", "n/a")
+            t3 = breakdown.get("tier3_retail", "n/a")
+            if t1 != "n/a" and t3 != "n/a" and t1 != t3:
+                reasoning += f" [Divergence: institutional={t1}, retail={t3}]"
 
             signals[ticker] = AnalystSignal(
                 agent_name="sentiment_analyst",
@@ -226,10 +300,13 @@ def sentiment_agent(state: AgentState) -> dict:
                 ticker=ticker,
                 signal=Signal.NEUTRAL,
                 confidence=10,
-                reasoning=f"Sentiment analysis error: {str(e)[:100]}. Sources checked: {coverage_str}",
+                reasoning=f"Analysis error: {str(e)[:100]}. Sources: {coverage_str}",
             )
 
     return {
-        "messages": [HumanMessage(content="Multi-source sentiment analysis complete.", name="sentiment_analyst")],
+        "messages": [HumanMessage(
+            content="Multi-source time-weighted sentiment analysis complete.",
+            name="sentiment_analyst",
+        )],
         "data": {"sentiment_signals": {t: s.model_dump() for t, s in signals.items()}},
     }
