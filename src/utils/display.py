@@ -57,36 +57,46 @@ def display_analysis_results(result: dict) -> None:
             buy_z = plan.get("buy_zone", {})
             sell_z = plan.get("sell_zone", {})
             stop = plan.get("stop_loss")
-            targets = plan.get("targets", [])
+            short_t = plan.get("short_term_targets", [])
+            mid_t = plan.get("mid_term_targets", [])
+            long_t = plan.get("long_term_targets", [])
             rr = plan.get("risk_reward")
             validity = plan.get("validity_label", "N/A")
 
             lines = [f"[bold]Trade Plan: {ticker}[/bold]\n"]
-            lines.append(f"  Current Price:  ${price:.2f}")
+            lines.append(f"  Current Price:   ${price:.2f}")
 
             if buy_z.get("low") and buy_z.get("high"):
-                lines.append(f"  [green]Buy Zone:      ${buy_z['low']:.2f} - ${buy_z['high']:.2f}[/green]")
+                lines.append(f"  [green]Buy Zone:       ${buy_z['low']:.2f} - ${buy_z['high']:.2f}[/green]")
 
             if sell_z.get("low") and sell_z.get("high"):
-                lines.append(f"  [red]Sell Zone:     ${sell_z['low']:.2f} - ${sell_z['high']:.2f}[/red]")
+                lines.append(f"  [red]Sell Zone:      ${sell_z['low']:.2f} - ${sell_z['high']:.2f}[/red]")
 
             if stop:
                 risk_pct = abs(price - stop) / price * 100
-                lines.append(f"  [bold red]Stop Loss:     ${stop:.2f}[/bold red] ({risk_pct:.1f}% risk)")
+                lines.append(f"  [bold red]Stop Loss:      ${stop:.2f}[/bold red] ({risk_pct:.1f}% risk)")
 
-            if targets:
-                for i, t in enumerate(targets, 1):
-                    gain_pct = abs(t["price"] - price) / price * 100
-                    lines.append(f"  Target {i}:       ${t['price']:.2f} ({t['label']}, +{gain_pct:.1f}%)")
+            def _format_targets(targets, label, color):
+                if not targets:
+                    return
+                lines.append(f"  [{color}]{label}:[/{color}]")
+                for t in targets:
+                    pct = abs(t["price"] - price) / price * 100
+                    sign = "+" if t["price"] > price else "-"
+                    lines.append(f"    ${t['price']:.2f}  ({t['label']}, {sign}{pct:.1f}%)")
+
+            _format_targets(short_t, "Short-term (1-5 days)", "cyan")
+            _format_targets(mid_t, "Mid-term (1-4 weeks)", "yellow")
+            _format_targets(long_t, "Long-term (1-3 months)", "magenta")
 
             if rr is not None:
                 rr_color = "green" if rr >= 2 else "yellow" if rr >= 1 else "red"
-                lines.append(f"  Risk/Reward:    [{rr_color}]{rr:.2f}[/{rr_color}]")
+                lines.append(f"  Risk/Reward:     [{rr_color}]{rr:.2f}[/{rr_color}]")
 
-            lines.append(f"  Validity:       {validity}")
+            lines.append(f"  Validity:        {validity}")
 
             if plan.get("reasoning"):
-                lines.append(f"  Basis:          {plan['reasoning']}")
+                lines.append(f"  Basis:           {plan['reasoning']}")
 
             console.print(Panel.fit(
                 "\n".join(lines),
