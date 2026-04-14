@@ -17,8 +17,8 @@ def get_llm(
         LLM_PROVIDER (default: "openai")
         LLM_MODEL (default: "gpt-4o")
     """
-    provider = (model_provider or os.getenv("LLM_PROVIDER", "openai")).lower()
-    model = model_name or os.getenv("LLM_MODEL", "gpt-4o")
+    provider = (model_provider or os.getenv("LLM_PROVIDER", "ollama")).lower()
+    model = model_name or os.getenv("LLM_MODEL", "qwen3.5:27b-nvfp4")
 
     if provider == "openai":
         from langchain_openai import ChatOpenAI

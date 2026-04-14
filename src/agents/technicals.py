@@ -1,9 +1,9 @@
 """Technical analyst agent — comprehensive indicator suite for ASX stocks.
 
 Indicators:
-  Trend:       SMA(20/50/200), EMA(12/26), MACD, ADX
+  Trend:       SMA(20/50/200), EMA(12/26), MACD, ADX, Supertrend
   Momentum:    RSI(14), Stochastic(14,3), Williams %R, CCI
-  Volatility:  Bollinger Bands(20,2), ATR(14), Keltner Channels
+  Volatility:  Bollinger Bands(20,2), ATR(14), Keltner Channels, Donchian Channel
   Volume:      OBV, VWAP, Volume Trend, Accumulation/Distribution
   Support:     Fibonacci Retracement Levels, Pivot Points
 """
@@ -271,6 +271,71 @@ def compute_keltner_channels(
     }
 
 
+def compute_supertrend(
+    highs: list[float], lows: list[float], closes: list[float],
+    period: int = 10, multiplier: float = 3.0,
+) -> dict:
+    """Supertrend — ATR-based trend-following indicator.
+
+    Returns the current supertrend value and direction (1=bullish, -1=bearish).
+    """
+    n = len(closes)
+    if n < period + 1:
+        return {"value": None, "direction": None}
+
+    # Compute ATR series
+    tr_list = [highs[0] - lows[0]]
+    for i in range(1, n):
+        tr_list.append(max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        ))
+
+    # Wilder's smoothed ATR
+    atr = [float(np.mean(tr_list[:period]))]
+    for i in range(period, n):
+        atr.append((atr[-1] * (period - 1) + tr_list[i]) / period)
+
+    # Supertrend calculation
+    upper_band = [0.0] * n
+    lower_band = [0.0] * n
+    supertrend = [0.0] * n
+    direction = [1] * n  # 1=bullish, -1=bearish
+
+    for i in range(period, n):
+        atr_idx = i - period
+        hl2 = (highs[i] + lows[i]) / 2
+        basic_upper = hl2 + multiplier * atr[atr_idx]
+        basic_lower = hl2 - multiplier * atr[atr_idx]
+
+        upper_band[i] = min(basic_upper, upper_band[i - 1]) if closes[i - 1] <= upper_band[i - 1] else basic_upper
+        lower_band[i] = max(basic_lower, lower_band[i - 1]) if closes[i - 1] >= lower_band[i - 1] else basic_lower
+
+        if closes[i] > upper_band[i]:
+            direction[i] = 1
+        elif closes[i] < lower_band[i]:
+            direction[i] = -1
+        else:
+            direction[i] = direction[i - 1]
+
+        supertrend[i] = lower_band[i] if direction[i] == 1 else upper_band[i]
+
+    return {"value": supertrend[-1], "direction": direction[-1]}
+
+
+def compute_donchian_channel(
+    highs: list[float], lows: list[float], period: int = 20,
+) -> dict:
+    """Donchian Channel — highest high / lowest low over N periods."""
+    if len(highs) < period:
+        return {"upper": None, "middle": None, "lower": None}
+    upper = max(highs[-period:])
+    lower = min(lows[-period:])
+    middle = (upper + lower) / 2
+    return {"upper": upper, "middle": middle, "lower": lower}
+
+
 # ───── Volume Indicators ─────
 
 
@@ -534,7 +599,41 @@ def technicals_agent(state: AgentState) -> dict:
             atr_pct = atr / current_price * 100
             details.append(f"ATR={atr:.3f} ({atr_pct:.1f}% of price) — {'high' if atr_pct > 3 else 'normal'} volatility")
 
-        # ━━━ 10. VOLUME: OBV trend ━━━
+        # ━━━ 10. TREND: Supertrend ━━━
+        st = compute_supertrend(highs, lows, closes)
+        if st["direction"] is not None:
+            checks += 1
+            if st["direction"] == 1:
+                score += 1
+                details.append(f"Supertrend BULLISH (support at {st['value']:.2f})")
+            else:
+                score -= 1
+                details.append(f"Supertrend BEARISH (resistance at {st['value']:.2f})")
+
+        # ━━━ 11. VOLATILITY: Donchian Channel ━━━
+        dc = compute_donchian_channel(highs, lows)
+        if dc["upper"] is not None:
+            checks += 1
+            dc_range = dc["upper"] - dc["lower"]
+            if dc_range > 0:
+                dc_pos = (current_price - dc["lower"]) / dc_range
+                if dc_pos > 0.95:
+                    score += 0.5
+                    details.append(f"Donchian breakout — at 20-day high ({dc['upper']:.2f})")
+                elif dc_pos < 0.05:
+                    score -= 0.5
+                    details.append(f"Donchian breakdown — at 20-day low ({dc['lower']:.2f})")
+                else:
+                    details.append(f"Donchian position: {dc_pos:.0%} (range {dc['lower']:.2f}-{dc['upper']:.2f})")
+
+        # ━━━ 12. VOLATILITY: Keltner Channel + BB Squeeze ━━━
+        kc = compute_keltner_channels(highs, lows, closes)
+        if kc["upper"] is not None and bb["upper"] is not None:
+            # Keltner-BB squeeze: BB inside KC = low volatility, breakout imminent
+            if bb["upper"] < kc["upper"] and bb["lower"] > kc["lower"]:
+                details.append("KC-BB squeeze — Bollinger inside Keltner, expect breakout")
+
+        # ━━━ VOLUME: OBV trend ━━━
         obv = compute_obv(closes, volumes)
         if len(obv) >= 20:
             checks += 1
@@ -635,6 +734,10 @@ def technicals_agent(state: AgentState) -> dict:
             "bb_pct_b": bb.get("pct_b") if bb else None,
             "atr": atr,
             "vwap": vwap,
+            "supertrend_dir": st.get("direction"),
+            "supertrend_val": st.get("value"),
+            "donchian_upper": dc.get("upper") if dc else None,
+            "donchian_lower": dc.get("lower") if dc else None,
             "score": round(score, 2),
             "checks": checks,
         }

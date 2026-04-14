@@ -35,7 +35,7 @@ def main():
         "--analysts",
         type=str,
         default=None,
-        help="Comma-separated analyst names: fundamentals,valuation,technicals,sentiment",
+        help="Comma-separated analyst names: technicals,sentiment,timeframe",
     )
     parser.add_argument(
         "--cash",
@@ -47,6 +47,11 @@ def main():
         "--backtest",
         action="store_true",
         help="Run in backtest mode",
+    )
+    parser.add_argument(
+        "--walk-forward",
+        action="store_true",
+        help="Run walk-forward validation (overfitting detection)",
     )
     parser.add_argument(
         "--output",
@@ -61,7 +66,19 @@ def main():
     tickers = [t.strip() for t in args.tickers.split(",")]
     analysts = [a.strip() for a in args.analysts.split(",")] if args.analysts else None
 
-    if args.backtest:
+    if args.walk_forward:
+        from src.backtesting.engine import run_walk_forward
+        from src.utils.display import display_walk_forward_results
+
+        wf = run_walk_forward(
+            tickers=tickers,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            initial_cash=args.cash,
+            analysts=analysts,
+        )
+        display_walk_forward_results(wf)
+    elif args.backtest:
         from src.backtesting.engine import run_backtest
         from src.utils.display import display_backtest_results
 

@@ -5,10 +5,9 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from src.agents.fundamentals import fundamentals_agent
-from src.agents.valuation import valuation_agent
 from src.agents.technicals import technicals_agent
 from src.agents.sentiment import sentiment_agent
+from src.agents.timeframe import timeframe_agent
 from src.agents.risk_manager import risk_manager_agent
 from src.agents.portfolio_manager import portfolio_manager_agent
 from src.graph.state import AgentState
@@ -21,16 +20,15 @@ def build_graph(
 
     Args:
         analysts: List of analyst names to include. If None, uses all.
-                  Options: fundamentals, valuation, technicals, sentiment
+                  Options: technicals, sentiment, timeframe
 
     Returns:
         Compiled LangGraph StateGraph
     """
     available_analysts = {
-        "fundamentals": fundamentals_agent,
-        "valuation": valuation_agent,
         "technicals": technicals_agent,
         "sentiment": sentiment_agent,
+        "timeframe": timeframe_agent,
     }
 
     if analysts is None:

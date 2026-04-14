@@ -52,9 +52,8 @@ Respond with EXACTLY this JSON format:
 def _format_signals(data: dict, tickers: list[str]) -> str:
     """Format all analyst signals into readable text."""
     signal_keys = [
-        ("fundamentals_signals", "Fundamentals"),
-        ("valuation_signals", "Valuation"),
         ("technicals_signals", "Technicals"),
+        ("timeframe_signals", "Multi-Timeframe"),
         ("sentiment_signals", "Sentiment"),
         ("risk_signals", "Risk Manager"),
     ]
