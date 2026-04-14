@@ -1,58 +1,51 @@
-"""Display utilities for terminal output."""
+"""Display utilities — optimized for mobile chat readability."""
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-console = Console()
+console = Console(width=50)  # Mobile-friendly width
+
+_SIG_ICON = {"bullish": "+", "bearish": "-", "neutral": "~"}
+_ACT_ICON = {"buy": "+", "sell": "-", "short": "-", "cover": "+", "hold": "~"}
 
 
 def display_analysis_results(result: dict) -> None:
-    """Display analysis results in a formatted table."""
+    """Display analysis results optimized for mobile chat."""
     data = result.get("data", {})
     decisions = data.get("decisions", [])
+    trade_plans = data.get("trade_plans", {})
+    company_briefs = data.get("company_briefs", {})
 
     if not decisions:
-        console.print("[yellow]No trade decisions generated.[/yellow]")
+        console.print("[yellow]No trade decisions.[/yellow]")
         return
 
-    # Decisions table
-    table = Table(title="ASX AI Hedge Fund — Trade Decisions", show_lines=True)
-    table.add_column("Ticker", style="bold cyan")
-    table.add_column("Action", style="bold")
-    table.add_column("Allocation", justify="right")
-    table.add_column("Confidence", justify="right")
-    table.add_column("Reasoning")
-
-    action_colors = {
-        "buy": "green",
-        "sell": "red",
-        "short": "red",
-        "cover": "green",
-        "hold": "yellow",
-    }
-
     for d in decisions:
+        ticker = d.get("ticker", "")
         action = d.get("action", "hold")
-        color = action_colors.get(action, "white")
         alloc = d.get("allocation_pct", 0)
-        table.add_row(
-            d.get("ticker", ""),
-            f"[{color}]{action.upper()}[/{color}]",
-            f"{alloc:.0f}%",
-            f"{d.get('confidence', 0):.0f}%",
-            d.get("reasoning", "")[:80],
-        )
+        conf = d.get("confidence", 0)
+        reasoning = d.get("reasoning", "")
 
-    console.print(table)
+        act_color = {"buy": "green", "sell": "red", "short": "red", "cover": "green", "hold": "yellow"}.get(action, "white")
+        icon = _ACT_ICON.get(action, "")
 
-    # Trade plans
-    trade_plans = data.get("trade_plans", {})
-    if trade_plans:
-        for ticker, plan in trade_plans.items():
-            if not plan.get("current_price"):
-                continue
+        # ── Header: Company + Decision ──
+        lines = []
 
+        # Company intro
+        brief = company_briefs.get(ticker, ticker)
+        lines.append(f"[dim]{brief}[/dim]")
+        lines.append("")
+
+        # Decision
+        lines.append(f"[{act_color} bold]{icon} {action.upper()}  {alloc}%[/{act_color} bold]  conf {conf:.0f}%")
+        lines.append(f"[dim]{reasoning[:120]}[/dim]")
+
+        # ── Trade Plan ──
+        plan = trade_plans.get(ticker)
+        if plan and plan.get("current_price"):
             price = plan["current_price"]
             buy_z = plan.get("buy_zone", {})
             sell_z = plan.get("sell_zone", {})
@@ -63,76 +56,71 @@ def display_analysis_results(result: dict) -> None:
             rr = plan.get("risk_reward")
             validity = plan.get("validity_label", "N/A")
 
-            lines = [f"[bold]Trade Plan: {ticker}[/bold]\n"]
-            lines.append(f"  Current Price:   ${price:.2f}")
+            lines.append("")
+            lines.append(f"Price  ${price:.2f}")
 
             if buy_z.get("low") and buy_z.get("high"):
-                lines.append(f"  [green]Buy Zone:       ${buy_z['low']:.2f} - ${buy_z['high']:.2f}[/green]")
+                lines.append(f"[green]Buy    ${buy_z['low']:.2f} - ${buy_z['high']:.2f}[/green]")
 
             if sell_z.get("low") and sell_z.get("high"):
-                lines.append(f"  [red]Sell Zone:      ${sell_z['low']:.2f} - ${sell_z['high']:.2f}[/red]")
+                lines.append(f"[red]Sell   ${sell_z['low']:.2f} - ${sell_z['high']:.2f}[/red]")
 
             if stop:
                 risk_pct = abs(price - stop) / price * 100
-                lines.append(f"  [bold red]Stop Loss:      ${stop:.2f}[/bold red] ({risk_pct:.1f}% risk)")
+                lines.append(f"[bold red]Stop   ${stop:.2f}[/bold red] (-{risk_pct:.1f}%)")
 
-            def _format_targets(targets, label, color):
+            # Targets
+            def _fmt_targets(targets, label):
                 if not targets:
                     return
-                lines.append(f"  [{color}]{label}:[/{color}]")
+                lines.append(f"\n[bold]{label}[/bold]")
                 for t in targets:
                     pct = abs(t["price"] - price) / price * 100
                     sign = "+" if t["price"] > price else "-"
-                    lines.append(f"    ${t['price']:.2f}  ({t['label']}, {sign}{pct:.1f}%)")
+                    lines.append(f"  ${t['price']:.2f}  {sign}{pct:.1f}%  {t['label']}")
 
-            _format_targets(short_t, "Short-term (1-5 days)", "cyan")
-            _format_targets(mid_t, "Mid-term (1-4 weeks)", "yellow")
-            _format_targets(long_t, "Long-term (1-3 months)", "magenta")
+            _fmt_targets(short_t, "Short  1-5d")
+            _fmt_targets(mid_t, "Mid  1-4w")
+            _fmt_targets(long_t, "Long  1-3m")
 
+            # Footer
+            lines.append("")
+            parts = []
             if rr is not None:
-                rr_color = "green" if rr >= 2 else "yellow" if rr >= 1 else "red"
-                lines.append(f"  Risk/Reward:     [{rr_color}]{rr:.2f}[/{rr_color}]")
+                parts.append(f"R/R {rr:.2f}")
+            parts.append(validity)
+            lines.append("[dim]" + "  |  ".join(parts) + "[/dim]")
 
-            lines.append(f"  Validity:        {validity}")
+        console.print(Panel(
+            "\n".join(lines),
+            title=f"[bold]{ticker}[/bold]",
+            border_style=act_color,
+            width=50,
+        ))
 
-            if plan.get("reasoning"):
-                lines.append(f"  Basis:           {plan['reasoning']}")
-
-            console.print(Panel.fit(
-                "\n".join(lines),
-                border_style="cyan",
-            ))
-
-    # Signal summary
+    # ── Signals Summary (compact) ──
     signal_keys = [
-        ("technicals_signals", "Technicals"),
-        ("timeframe_signals", "Multi-Timeframe"),
-        ("sentiment_signals", "Sentiment"),
+        ("technicals_signals", "Tech"),
+        ("timeframe_signals", "TF"),
+        ("sentiment_signals", "Sent"),
         ("risk_signals", "Risk"),
     ]
 
-    for key, name in signal_keys:
-        signals = data.get(key, {})
-        if signals:
-            sig_table = Table(title=f"{name} Signals", show_lines=True)
-            sig_table.add_column("Ticker", style="cyan")
-            sig_table.add_column("Signal")
-            sig_table.add_column("Confidence", justify="right")
-            sig_table.add_column("Reasoning")
-
-            signal_colors = {"bullish": "green", "bearish": "red", "neutral": "yellow"}
-
-            for ticker, s in signals.items():
+    for ticker in [d.get("ticker") for d in decisions]:
+        sig_parts = []
+        for key, label in signal_keys:
+            signals = data.get(key, {})
+            if ticker in signals:
+                s = signals[ticker]
                 sig = s.get("signal", "neutral")
-                color = signal_colors.get(sig, "white")
-                sig_table.add_row(
-                    ticker,
-                    f"[{color}]{sig.upper()}[/{color}]",
-                    f"{s.get('confidence', 0):.0f}%",
-                    s.get("reasoning", "")[:60],
-                )
+                conf = s.get("confidence", 0)
+                icon = _SIG_ICON.get(sig, "~")
+                sig_parts.append(f"{icon}{label} {conf:.0f}%")
 
-            console.print(sig_table)
+        if sig_parts:
+            console.print(f"[dim]{ticker}: {' | '.join(sig_parts)}[/dim]")
+
+    console.print()
 
 
 def display_backtest_results(metrics: dict) -> None:
@@ -150,57 +138,48 @@ def display_backtest_results(metrics: dict) -> None:
     ret_color = "green" if total_return >= 0 else "red"
     alpha_color = "green" if alpha >= 0 else "red"
 
-    console.print(Panel.fit(
-        f"[bold]Backtest Results[/bold]\n\n"
-        f"  Total Return:      [{ret_color}]{total_return:.2f}%[/]\n"
-        f"  Benchmark (ASX200): {benchmark:.2f}%\n"
-        f"  Alpha:             [{alpha_color}]{alpha:.2f}%[/]\n"
-        f"  Sharpe Ratio:      {sharpe:.3f}\n"
-        f"  Calmar Ratio:      {calmar:.3f}\n"
-        f"  Max Drawdown:      [red]{max_dd:.2f}%[/]\n"
-        f"  Profit Factor:     {pf:.2f}\n"
-        f"  Win Rate:          {win_rate:.1f}%\n"
-        f"  Total Trades:      {metrics.get('total_trades', 0)}\n"
-        f"  Total Commission:  ${commission:,.2f}\n"
-        f"  Final Value:       ${metrics.get('final_value', 0):,.2f} AUD",
-        title="ASX AI Hedge Fund Backtest",
+    console.print(Panel(
+        f"Return    [{ret_color}]{total_return:.2f}%[/]\n"
+        f"ASX200    {benchmark:.2f}%\n"
+        f"Alpha     [{alpha_color}]{alpha:.2f}%[/]\n"
+        f"Sharpe    {sharpe:.3f}\n"
+        f"Calmar    {calmar:.3f}\n"
+        f"Max DD    [red]{max_dd:.2f}%[/]\n"
+        f"PF        {pf:.2f}\n"
+        f"Win Rate  {win_rate:.1f}%\n"
+        f"Trades    {metrics.get('total_trades', 0)}\n"
+        f"Fees      ${commission:,.2f}\n"
+        f"Final     ${metrics.get('final_value', 0):,.2f}",
+        title="[bold]Backtest[/bold]",
         border_style="blue",
+        width=40,
     ))
 
 
 def display_walk_forward_results(wf: dict) -> None:
     """Display walk-forward validation results."""
-    table = Table(title="Walk-Forward Validation", show_lines=True)
-    table.add_column("Fold", style="bold")
-    table.add_column("Train Period")
-    table.add_column("Train Return", justify="right")
-    table.add_column("Test Period")
-    table.add_column("Test Return", justify="right")
-
+    lines = []
     for f in wf.get("folds", []):
         tr = f["train_return"]
         te = f["test_return"]
-        table.add_row(
-            str(f["fold"]),
-            f["train_period"],
-            f"[{'green' if tr >= 0 else 'red'}]{tr:.2f}%[/]",
-            f["test_period"],
-            f"[{'green' if te >= 0 else 'red'}]{te:.2f}%[/]",
+        tr_c = "green" if tr >= 0 else "red"
+        te_c = "green" if te >= 0 else "red"
+        lines.append(
+            f"Fold {f['fold']}: "
+            f"Train [{tr_c}]{tr:.1f}%[/] "
+            f"Test [{te_c}]{te:.1f}%[/]"
         )
-
-    console.print(table)
 
     verdict = wf.get("verdict", "UNKNOWN")
     score = wf.get("robustness_score", 0)
-    verdict_colors = {
-        "ROBUST": "green", "MODERATE": "yellow",
-        "WEAK": "red", "OVERFITTED": "bold red",
-    }
-    color = verdict_colors.get(verdict, "white")
+    v_color = {"ROBUST": "green", "MODERATE": "yellow", "WEAK": "red", "OVERFITTED": "bold red"}.get(verdict, "white")
 
-    console.print(Panel.fit(
-        f"  Robustness Score: {score:.3f}\n"
-        f"  Verdict:          [{color}]{verdict}[/{color}]",
-        title="Walk-Forward Summary",
+    lines.append(f"\nScore  {score:.3f}")
+    lines.append(f"[{v_color}]{verdict}[/{v_color}]")
+
+    console.print(Panel(
+        "\n".join(lines),
+        title="[bold]Walk-Forward[/bold]",
         border_style="blue",
+        width=40,
     ))

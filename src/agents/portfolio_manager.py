@@ -133,6 +133,29 @@ def portfolio_manager_agent(state: AgentState) -> dict:
             ]
         )
 
+    # Fetch company info for display
+    from src.tools.asx_data import get_company_info, get_financial_metrics
+    company_briefs = {}
+    for ticker in tickers:
+        info = get_company_info(ticker)
+        metrics = get_financial_metrics(ticker)
+        if info:
+            parts = [info.name]
+            if info.sector:
+                parts.append(info.sector)
+            if metrics and metrics.market_cap:
+                cap = metrics.market_cap
+                if cap >= 1e12:
+                    cap_str = f"${cap/1e12:.1f}T"
+                elif cap >= 1e9:
+                    cap_str = f"${cap/1e9:.1f}B"
+                else:
+                    cap_str = f"${cap/1e6:.0f}M"
+                parts.append(f"Market Cap {cap_str}")
+            if metrics and metrics.dividend_yield:
+                parts.append(f"Div Yield {metrics.dividend_yield:.1f}%")
+            company_briefs[ticker] = " | ".join(parts)
+
     # Generate trade plans from indicator data (no LLM needed)
     trade_plans = {}
     indicators_data = data.get("technicals_indicators", {})
@@ -155,5 +178,6 @@ def portfolio_manager_agent(state: AgentState) -> dict:
         "data": {
             "decisions": [d.model_dump() for d in decisions.decisions],
             "trade_plans": trade_plans,
+            "company_briefs": company_briefs,
         },
     }
