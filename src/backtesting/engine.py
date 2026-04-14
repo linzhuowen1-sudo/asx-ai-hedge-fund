@@ -20,7 +20,7 @@ from src.tools.asx_data import ensure_asx_ticker
 
 # ──────────────────────── Configuration ────────────────────────
 
-COMMISSION_RATE = 0.001    # 0.1% per trade (typical ASX online broker)
+COMMISSION_RATE = 0.005    # 0.5% per trade
 SLIPPAGE_RATE = 0.0005     # 0.05% slippage estimate
 RISK_FREE_RATE = 0.04      # 4% annual (RBA cash rate proxy)
 
