@@ -30,13 +30,13 @@ For each ticker, decide on an action and recommend a portfolio allocation percen
 The allocation_pct is what percentage of total portfolio value should be allocated to this ticker.
 
 Guidelines for allocation_pct:
-The portfolio is diversified across 20-25 positions. Size accordingly:
-- Strong conviction (high confidence, aligned signals): 5-8%
-- Moderate conviction: 3-5%
-- Low conviction or hold: 1-3%
+The portfolio is diversified across 15-20 positions. Size accordingly:
+- Strong conviction (high confidence, aligned signals): 7-10%
+- Moderate conviction: 4-7%
+- Low conviction or hold: 2-4%
 - Sell/short: 0% (exit position)
 - Total allocation across all tickers should not exceed 90% (keep 10% cash reserve)
-- Single position should NEVER exceed 8%
+- Single position should NEVER exceed 10%
 
 Consider:
 1. Signal consensus across analysts
@@ -50,7 +50,7 @@ Respond with EXACTLY this JSON format:
         {{
             "ticker": "<ticker>",
             "action": "buy|sell|short|cover|hold",
-            "allocation_pct": <number 0-8>,
+            "allocation_pct": <number 0-10>,
             "confidence": <number 10-100>,
             "reasoning": "<brief explanation>"
         }}
