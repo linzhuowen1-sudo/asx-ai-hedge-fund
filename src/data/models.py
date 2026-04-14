@@ -37,7 +37,7 @@ class TradeDecision(BaseModel):
     """A single trade decision from the portfolio manager."""
     ticker: str
     action: Action
-    quantity: int = 0
+    allocation_pct: float = Field(default=0, description="Recommended portfolio allocation percentage (0-100)")
     confidence: float = Field(ge=0, le=100)
     reasoning: str
 

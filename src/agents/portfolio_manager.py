@@ -26,14 +26,22 @@ Positions: {positions}
 {signals_text}
 
 ## Instructions
-For each ticker, decide on an action: buy, sell, short, cover, or hold.
+For each ticker, decide on an action and recommend a portfolio allocation percentage.
+The allocation_pct is what percentage of total portfolio value should be allocated to this ticker.
+
+Guidelines for allocation_pct:
+- Strong conviction (high confidence, aligned signals): 15-25%
+- Moderate conviction: 8-15%
+- Low conviction or hold: 3-8%
+- Sell/short: 0% (exit position)
+- Total allocation across all tickers should not exceed 90% (keep 10% cash reserve)
+- Single position should not exceed 25%
+
 Consider:
 1. Signal consensus across analysts
 2. Confidence-weighted signal strength
 3. Risk manager warnings
-4. Position sizing (never exceed max_position_pct of portfolio)
-5. Maintain minimum cash reserve
-6. ASX-specific factors: franking credits make dividend stocks attractive for hold, mining stocks can be volatile
+4. ASX-specific factors: franking credits make dividend stocks attractive for hold, mining stocks can be volatile
 
 Respond with EXACTLY this JSON format:
 {{
@@ -41,7 +49,7 @@ Respond with EXACTLY this JSON format:
         {{
             "ticker": "<ticker>",
             "action": "buy|sell|short|cover|hold",
-            "quantity": <integer>,
+            "allocation_pct": <number 0-25>,
             "confidence": <number 10-100>,
             "reasoning": "<brief explanation>"
         }}

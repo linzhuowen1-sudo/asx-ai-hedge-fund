@@ -20,7 +20,7 @@ def display_analysis_results(result: dict) -> None:
     table = Table(title="ASX AI Hedge Fund — Trade Decisions", show_lines=True)
     table.add_column("Ticker", style="bold cyan")
     table.add_column("Action", style="bold")
-    table.add_column("Qty", justify="right")
+    table.add_column("Allocation", justify="right")
     table.add_column("Confidence", justify="right")
     table.add_column("Reasoning")
 
@@ -35,10 +35,11 @@ def display_analysis_results(result: dict) -> None:
     for d in decisions:
         action = d.get("action", "hold")
         color = action_colors.get(action, "white")
+        alloc = d.get("allocation_pct", 0)
         table.add_row(
             d.get("ticker", ""),
             f"[{color}]{action.upper()}[/{color}]",
-            str(d.get("quantity", 0)),
+            f"{alloc:.0f}%",
             f"{d.get('confidence', 0):.0f}%",
             d.get("reasoning", "")[:80],
         )

@@ -77,9 +77,9 @@ def run_backtest(
         for decision in decisions:
             ticker = decision.get("ticker", "")
             action = decision.get("action", "hold")
-            quantity = decision.get("quantity", 0)
+            alloc_pct = decision.get("allocation_pct", 0)
 
-            if action == "hold" or quantity == 0:
+            if action == "hold" or alloc_pct <= 0:
                 continue
 
             try:
@@ -99,6 +99,12 @@ def run_backtest(
                 exec_price = price * (1 + SLIPPAGE_RATE)
             else:
                 exec_price = price * (1 - SLIPPAGE_RATE)
+
+            # Convert allocation_pct to quantity
+            target_value = portfolio["total_value"] * alloc_pct / 100
+            quantity = int(target_value / exec_price) if exec_price > 0 else 0
+            if quantity <= 0:
+                continue
 
             cost = exec_price * quantity
             commission = cost * COMMISSION_RATE
