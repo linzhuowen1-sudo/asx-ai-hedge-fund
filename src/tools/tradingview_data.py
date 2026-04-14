@@ -112,7 +112,8 @@ def get_tv_multi_timeframe(
     if intervals is None:
         intervals = ["1W", "1d", "4h"]
 
-    results = {}
-    for interval in intervals:
-        results[interval] = get_tv_analysis(ticker, interval)
-    return results
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=len(intervals)) as executor:
+        futures = {interval: executor.submit(get_tv_analysis, ticker, interval) for interval in intervals}
+        return {interval: future.result() for interval, future in futures.items()}

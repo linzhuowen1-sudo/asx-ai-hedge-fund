@@ -600,11 +600,25 @@ def fetch_all_au_news(
     if company_name:
         search_term = f"{company_name} {search_term}"
 
-    return {
-        "bloomberg": fetch_bloomberg_news(search_term, max_per_source),
-        "afr": fetch_afr_news(search_term, max_per_source),
-        "the_australian": fetch_theaustralian_news(search_term, max_per_source),
-        "twitter": fetch_twitter_news(search_term, max_per_source),
-        "reddit": fetch_reddit_posts(search_term, max_per_source),
-        "google_news_au": fetch_google_news_au(search_term, max_per_source),
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    sources = {
+        "bloomberg": lambda: fetch_bloomberg_news(search_term, max_per_source),
+        "afr": lambda: fetch_afr_news(search_term, max_per_source),
+        "the_australian": lambda: fetch_theaustralian_news(search_term, max_per_source),
+        "twitter": lambda: fetch_twitter_news(search_term, max_per_source),
+        "reddit": lambda: fetch_reddit_posts(search_term, max_per_source),
+        "google_news_au": lambda: fetch_google_news_au(search_term, max_per_source),
     }
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(fn): name for name, fn in sources.items()}
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                results[name] = future.result()
+            except Exception:
+                results[name] = []
+
+    return results
