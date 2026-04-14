@@ -4,9 +4,10 @@ import json
 
 from langchain_core.messages import HumanMessage
 
-from src.data.models import Action, AnalystSignal, PortfolioDecisions, Signal, TradeDecision
+from src.data.models import Action, PortfolioDecisions, TradeDecision
 from src.graph.state import AgentState
 from src.llm.models import get_llm
+from src.agents.trade_plan import compute_trade_plan
 
 
 PORTFOLIO_PROMPT = """You are a portfolio manager for an AI hedge fund that trades on the Australian Securities Exchange (ASX).
@@ -94,7 +95,12 @@ def portfolio_manager_agent(state: AgentState) -> dict:
         response = llm.invoke(prompt)
         content = response.content.strip()
 
-        # Parse JSON
+        # Parse JSON — handle thinking tags from some models
+        if "<think>" in content:
+            think_end = content.rfind("</think>")
+            if think_end != -1:
+                content = content[think_end + 8:].strip()
+
         if "```" in content:
             content = content.split("```")[1]
             if content.startswith("json"):
@@ -118,7 +124,27 @@ def portfolio_manager_agent(state: AgentState) -> dict:
             ]
         )
 
+    # Generate trade plans from indicator data (no LLM needed)
+    trade_plans = {}
+    indicators_data = data.get("technicals_indicators", {})
+    timeframe_data = data.get("timeframe_signals", {})
+
+    for decision in decisions.decisions:
+        ticker = decision.ticker
+        indicators = indicators_data.get(ticker, {})
+        tf_signal = timeframe_data.get(ticker)
+        if indicators:
+            trade_plans[ticker] = compute_trade_plan(
+                ticker=ticker,
+                indicators=indicators,
+                timeframe_signal=tf_signal,
+                action=decision.action.value if hasattr(decision.action, 'value') else decision.action,
+            )
+
     return {
         "messages": [HumanMessage(content="Portfolio decisions complete.", name="portfolio_manager")],
-        "data": {"decisions": [d.model_dump() for d in decisions.decisions]},
+        "data": {
+            "decisions": [d.model_dump() for d in decisions.decisions],
+            "trade_plans": trade_plans,
+        },
     }

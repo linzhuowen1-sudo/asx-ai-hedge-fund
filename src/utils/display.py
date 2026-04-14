@@ -45,6 +45,53 @@ def display_analysis_results(result: dict) -> None:
 
     console.print(table)
 
+    # Trade plans
+    trade_plans = data.get("trade_plans", {})
+    if trade_plans:
+        for ticker, plan in trade_plans.items():
+            if not plan.get("current_price"):
+                continue
+
+            price = plan["current_price"]
+            buy_z = plan.get("buy_zone", {})
+            sell_z = plan.get("sell_zone", {})
+            stop = plan.get("stop_loss")
+            targets = plan.get("targets", [])
+            rr = plan.get("risk_reward")
+            validity = plan.get("validity_label", "N/A")
+
+            lines = [f"[bold]Trade Plan: {ticker}[/bold]\n"]
+            lines.append(f"  Current Price:  ${price:.2f}")
+
+            if buy_z.get("low") and buy_z.get("high"):
+                lines.append(f"  [green]Buy Zone:      ${buy_z['low']:.2f} - ${buy_z['high']:.2f}[/green]")
+
+            if sell_z.get("low") and sell_z.get("high"):
+                lines.append(f"  [red]Sell Zone:     ${sell_z['low']:.2f} - ${sell_z['high']:.2f}[/red]")
+
+            if stop:
+                risk_pct = abs(price - stop) / price * 100
+                lines.append(f"  [bold red]Stop Loss:     ${stop:.2f}[/bold red] ({risk_pct:.1f}% risk)")
+
+            if targets:
+                for i, t in enumerate(targets, 1):
+                    gain_pct = abs(t["price"] - price) / price * 100
+                    lines.append(f"  Target {i}:       ${t['price']:.2f} ({t['label']}, +{gain_pct:.1f}%)")
+
+            if rr is not None:
+                rr_color = "green" if rr >= 2 else "yellow" if rr >= 1 else "red"
+                lines.append(f"  Risk/Reward:    [{rr_color}]{rr:.2f}[/{rr_color}]")
+
+            lines.append(f"  Validity:       {validity}")
+
+            if plan.get("reasoning"):
+                lines.append(f"  Basis:          {plan['reasoning']}")
+
+            console.print(Panel.fit(
+                "\n".join(lines),
+                border_style="cyan",
+            ))
+
     # Signal summary
     signal_keys = [
         ("technicals_signals", "Technicals"),

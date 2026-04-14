@@ -718,8 +718,9 @@ def technicals_agent(state: AgentState) -> dict:
                 signal = Signal.NEUTRAL
                 confidence = 25 + abs(ratio) * 30
 
-        # Include raw indicator values for portfolio manager
+        # Include raw indicator values for portfolio manager and trade plan
         indicator_snapshot = {
+            "current_price": current_price,
             "sma20": smas.get("sma20"),
             "sma50": smas.get("sma50"),
             "sma200": smas.get("sma200"),
@@ -731,13 +732,22 @@ def technicals_agent(state: AgentState) -> dict:
             "williams_r": williams,
             "cci": cci,
             "adx": adx,
-            "bb_pct_b": bb.get("pct_b") if bb else None,
+            "bb_upper": bb.get("upper"),
+            "bb_middle": bb.get("middle"),
+            "bb_lower": bb.get("lower"),
+            "bb_pct_b": bb.get("pct_b"),
+            "bb_bandwidth": bb.get("bandwidth"),
             "atr": atr,
             "vwap": vwap,
             "supertrend_dir": st.get("direction"),
             "supertrend_val": st.get("value"),
             "donchian_upper": dc.get("upper") if dc else None,
+            "donchian_middle": dc.get("middle") if dc else None,
             "donchian_lower": dc.get("lower") if dc else None,
+            "keltner_upper": kc.get("upper") if kc else None,
+            "keltner_lower": kc.get("lower") if kc else None,
+            "fib_levels": fib if fib else None,
+            "pivot_points": pivots if len(prices) >= 2 else None,
             "score": round(score, 2),
             "checks": checks,
         }
